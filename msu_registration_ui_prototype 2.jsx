@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
-import { GraduationCap, BookOpen, Building2, User, Search, LogIn, CheckCircle2, CalendarDays } from "lucide-react";
+import { GraduationCap, BookOpen, Building2, User, Users, Search, LogIn, CheckCircle2, CalendarDays, ClipboardList } from "lucide-react";
 import { motion } from "framer-motion";
 
 const theme = {
@@ -89,6 +89,22 @@ const courseOptions = [
 
 const initialEnrollmentIds = [401, 402];
 
+const allEnrollments = [
+  { enrollment_id: 501, student_id: 1001, section_id: 401, enrolled_on: "2026-04-10", grade: "IP" },
+  { enrollment_id: 502, student_id: 1001, section_id: 402, enrolled_on: "2026-04-12", grade: "IP" },
+  { enrollment_id: 503, student_id: 1002, section_id: 401, enrolled_on: "2026-04-13", grade: "IP" },
+  { enrollment_id: 504, student_id: 1003, section_id: 403, enrolled_on: "2026-04-14", grade: "IP" },
+];
+
+function getStudentName(studentId) {
+  const student = sampleStudents.find((s) => s.student_id === studentId);
+  return student ? `${student.first_name} ${student.last_name}` : "Unknown Student";
+}
+
+function getCourseBySection(sectionId) {
+  return courseOptions.find((course) => course.section_id === sectionId);
+}
+
 function Header({ student, page, setPage }) {
   return (
     <header className="border-b" style={{ borderColor: theme.border, background: theme.white }}>
@@ -113,6 +129,9 @@ function Header({ student, page, setPage }) {
             <div className="flex gap-2">
               <Button variant={page === "enrolled" ? "default" : "outline"} className="rounded-xl" style={page === "enrolled" ? { background: theme.navy, color: theme.white } : {}} onClick={() => setPage("enrolled")}>Enrolled</Button>
               <Button variant={page === "options" ? "default" : "outline"} className="rounded-xl" style={page === "options" ? { background: theme.red, color: theme.white } : {}} onClick={() => setPage("options")}>Course Options</Button>
+              <Button variant={page === "courses" ? "default" : "outline"} className="rounded-xl" style={page === "courses" ? { background: theme.navy, color: theme.white } : {}} onClick={() => setPage("courses")}>Courses</Button>
+              <Button variant={page === "enrollmentList" ? "default" : "outline"} className="rounded-xl" style={page === "enrollmentList" ? { background: theme.navy, color: theme.white } : {}} onClick={() => setPage("enrollmentList")}>Enrollments</Button>
+              <Button variant={page === "rosters" ? "default" : "outline"} className="rounded-xl" style={page === "rosters" ? { background: theme.red, color: theme.white } : {}} onClick={() => setPage("rosters")}>Rosters</Button>
             </div>
           </div>
         )}
@@ -280,7 +299,7 @@ function CourseOptionsPage({ enrolledIds, onEnroll }) {
         <div>
           <p className="text-sm font-medium" style={{ color: theme.red }}>Course Registration</p>
           <h2 className="text-3xl font-semibold tracking-tight" style={{ color: theme.navy }}>Course Options</h2>
-          <p className="mt-2 max-w-3xl text-sm" style={{ color: theme.muted }}>This third page shows all course options, which classes are already enrolled, instructors, buildings, schedules, and credit information.</p>
+          <p className="mt-2 max-w-3xl text-sm" style={{ color: theme.muted }}>This page shows all course options, classes already enrolled, instructors, buildings, schedules, and credit information.</p>
         </div>
         <div className="relative min-w-[280px]">
           <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4" style={{ color: theme.muted }} />
@@ -336,10 +355,236 @@ function CourseOptionsPage({ enrolledIds, onEnroll }) {
   );
 }
 
+function AllCoursesPage() {
+  return (
+    <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+      <div>
+        <p className="text-sm font-medium" style={{ color: theme.red }}>Course Catalog</p>
+        <h2 className="text-3xl font-semibold tracking-tight" style={{ color: theme.navy }}>All Courses</h2>
+        <p className="mt-2 text-sm" style={{ color: theme.muted }}>Separate GUI page for viewing course records and section details.</p>
+      </div>
+
+      <Card className="rounded-2xl border shadow-sm" style={{ borderColor: theme.border }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2" style={{ color: theme.navy }}><BookOpen className="h-5 w-5" /> Course List</CardTitle>
+          <CardDescription>Shows course, instructor, building, room, schedule, and credits.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-hidden rounded-2xl border" style={{ borderColor: theme.border }}>
+            <Table>
+              <TableHeader style={{ background: `${theme.navy}08` }}>
+                <TableRow>
+                  <TableHead>Section ID</TableHead>
+                  <TableHead>Course</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Instructor</TableHead>
+                  <TableHead>Building / Room</TableHead>
+                  <TableHead>Schedule</TableHead>
+                  <TableHead>Credits</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {courseOptions.map((course) => (
+                  <TableRow key={course.section_id}>
+                    <TableCell>{course.section_id}</TableCell>
+                    <TableCell className="font-semibold" style={{ color: theme.navy }}>{course.course_code}</TableCell>
+                    <TableCell>{course.title}</TableCell>
+                    <TableCell>{course.instructor}</TableCell>
+                    <TableCell>{course.building}, {course.room}</TableCell>
+                    <TableCell>{course.schedule}</TableCell>
+                    <TableCell>{course.credits}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+function EnrollmentListPage({ studentEnrollments }) {
+  const rows = studentEnrollments.map((enrollment) => {
+    const course = getCourseBySection(enrollment.section_id);
+    return {
+      ...enrollment,
+      studentName: getStudentName(enrollment.student_id),
+      courseCode: course?.course_code ?? "Unknown",
+      courseTitle: course?.title ?? "Unknown Course",
+      instructor: course?.instructor ?? "Unknown Instructor",
+      credits: course?.credits ?? "—",
+    };
+  });
+
+  return (
+    <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+      <div>
+        <p className="text-sm font-medium" style={{ color: theme.red }}>Enrollment Records</p>
+        <h2 className="text-3xl font-semibold tracking-tight" style={{ color: theme.navy }}>All Enrollments</h2>
+        <p className="mt-2 text-sm" style={{ color: theme.muted }}>Separate GUI page for viewing enrollment records from the ENROLLMENT table.</p>
+      </div>
+
+      <Card className="rounded-2xl border shadow-sm" style={{ borderColor: theme.border }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2" style={{ color: theme.navy }}><ClipboardList className="h-5 w-5" /> Enrollment List</CardTitle>
+          <CardDescription>Shows which students are enrolled in which sections.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-hidden rounded-2xl border" style={{ borderColor: theme.border }}>
+            <Table>
+              <TableHeader style={{ background: `${theme.navy}08` }}>
+                <TableRow>
+                  <TableHead>Enrollment ID</TableHead>
+                  <TableHead>Student ID</TableHead>
+                  <TableHead>Student</TableHead>
+                  <TableHead>Course</TableHead>
+                  <TableHead>Instructor</TableHead>
+                  <TableHead>Credits</TableHead>
+                  <TableHead>Enrolled On</TableHead>
+                  <TableHead>Grade</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.enrollment_id}>
+                    <TableCell>{row.enrollment_id}</TableCell>
+                    <TableCell>{row.student_id}</TableCell>
+                    <TableCell>{row.studentName}</TableCell>
+                    <TableCell><span className="font-semibold" style={{ color: theme.navy }}>{row.courseCode}</span> — {row.courseTitle}</TableCell>
+                    <TableCell>{row.instructor}</TableCell>
+                    <TableCell>{row.credits}</TableCell>
+                    <TableCell>{row.enrolled_on}</TableCell>
+                    <TableCell>{row.grade}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
+
+function CourseRostersPage({ studentEnrollments }) {
+  const [selectedSectionId, setSelectedSectionId] = useState(courseOptions[0].section_id);
+  const selectedCourse = getCourseBySection(selectedSectionId);
+  const rosterRows = studentEnrollments
+    .filter((enrollment) => enrollment.section_id === selectedSectionId)
+    .map((enrollment) => ({
+      ...enrollment,
+      studentName: getStudentName(enrollment.student_id),
+    }));
+
+  return (
+    <main className="mx-auto max-w-7xl space-y-6 px-5 py-8">
+      <div>
+        <p className="text-sm font-medium" style={{ color: theme.red }}>Course Rosters</p>
+        <h2 className="text-3xl font-semibold tracking-tight" style={{ color: theme.navy }}>Students Enrolled by Course</h2>
+        <p className="mt-2 text-sm" style={{ color: theme.muted }}>This is the GUI your partner requested: choose a course and see the list of students enrolled in it.</p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <Card className="rounded-2xl border shadow-sm" style={{ borderColor: theme.border }}>
+          <CardHeader>
+            <CardTitle style={{ color: theme.navy }}>Select a Course</CardTitle>
+            <CardDescription>Click a course section to view its roster.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {courseOptions.map((course) => {
+              const count = studentEnrollments.filter((e) => e.section_id === course.section_id).length;
+              const isSelected = selectedSectionId === course.section_id;
+              return (
+                <button
+                  key={course.section_id}
+                  onClick={() => setSelectedSectionId(course.section_id)}
+                  className="w-full rounded-2xl border p-4 text-left transition"
+                  style={{
+                    borderColor: isSelected ? theme.navy : theme.border,
+                    background: isSelected ? `${theme.navy}08` : theme.white,
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold" style={{ color: theme.navy }}>{course.course_code}</p>
+                      <p className="text-sm" style={{ color: theme.text }}>{course.title}</p>
+                      <p className="mt-1 text-xs" style={{ color: theme.muted }}>{course.instructor} • {course.building}</p>
+                    </div>
+                    <Badge className="rounded-full" style={{ background: `${theme.red}12`, color: theme.red }}>{count} students</Badge>
+                  </div>
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border shadow-sm" style={{ borderColor: theme.border }}>
+          <CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2" style={{ color: theme.navy }}><Users className="h-5 w-5" /> {selectedCourse?.course_code} Roster</CardTitle>
+                <CardDescription>{selectedCourse?.title} • {selectedCourse?.semester} {selectedCourse?.year}</CardDescription>
+              </div>
+              <Badge className="rounded-full" style={{ background: `${theme.navy}12`, color: theme.navy }}>{rosterRows.length} enrolled</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border p-3" style={{ borderColor: theme.border }}>
+                <p className="text-xs" style={{ color: theme.muted }}>Instructor</p>
+                <p className="font-medium" style={{ color: theme.text }}>{selectedCourse?.instructor}</p>
+              </div>
+              <div className="rounded-xl border p-3" style={{ borderColor: theme.border }}>
+                <p className="text-xs" style={{ color: theme.muted }}>Location</p>
+                <p className="font-medium" style={{ color: theme.text }}>{selectedCourse?.building}, {selectedCourse?.room}</p>
+              </div>
+              <div className="rounded-xl border p-3" style={{ borderColor: theme.border }}>
+                <p className="text-xs" style={{ color: theme.muted }}>Credits</p>
+                <p className="font-medium" style={{ color: theme.text }}>{selectedCourse?.credits}</p>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border" style={{ borderColor: theme.border }}>
+              <Table>
+                <TableHeader style={{ background: `${theme.navy}08` }}>
+                  <TableRow>
+                    <TableHead>Student ID</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Enrollment ID</TableHead>
+                    <TableHead>Enrolled On</TableHead>
+                    <TableHead>Grade</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rosterRows.length > 0 ? rosterRows.map((row) => (
+                    <TableRow key={row.enrollment_id}>
+                      <TableCell>{row.student_id}</TableCell>
+                      <TableCell className="font-medium">{row.studentName}</TableCell>
+                      <TableCell>{row.enrollment_id}</TableCell>
+                      <TableCell>{row.enrolled_on}</TableCell>
+                      <TableCell>{row.grade}</TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center" style={{ color: theme.muted }}>No students enrolled in this course yet.</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </main>
+  );
+}
+
 export default function MSURegistrationUIPrototype() {
   const [student, setStudent] = useState(null);
   const [page, setPage] = useState("login");
   const [enrolledIds, setEnrolledIds] = useState(initialEnrollmentIds);
+  const [studentEnrollments, setStudentEnrollments] = useState(allEnrollments);
 
   const enrolledCourses = courseOptions.filter((course) => enrolledIds.includes(course.section_id));
 
@@ -351,6 +596,16 @@ export default function MSURegistrationUIPrototype() {
   function handleEnroll(sectionId) {
     if (!enrolledIds.includes(sectionId)) {
       setEnrolledIds([...enrolledIds, sectionId]);
+      setStudentEnrollments([
+        ...studentEnrollments,
+        {
+          enrollment_id: 500 + studentEnrollments.length + 1,
+          student_id: student.student_id,
+          section_id: sectionId,
+          enrolled_on: new Date().toISOString().slice(0, 10),
+          grade: "IP",
+        },
+      ]);
     }
   }
 
@@ -360,6 +615,9 @@ export default function MSURegistrationUIPrototype() {
       {!student && <LoginPage onLogin={handleLogin} />}
       {student && page === "enrolled" && <EnrolledCoursesPage enrolledCourses={enrolledCourses} setPage={setPage} />}
       {student && page === "options" && <CourseOptionsPage enrolledIds={enrolledIds} onEnroll={handleEnroll} />}
+      {student && page === "courses" && <AllCoursesPage />}
+      {student && page === "enrollmentList" && <EnrollmentListPage studentEnrollments={studentEnrollments} />}
+      {student && page === "rosters" && <CourseRostersPage studentEnrollments={studentEnrollments} />}
     </div>
   );
 }
