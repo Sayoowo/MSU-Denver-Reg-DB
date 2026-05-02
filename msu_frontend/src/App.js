@@ -20,6 +20,17 @@ const theme = {
   muted: "#6B7280",
 };
 
+function authFetch(url, token, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+      ...options.headers,
+    },
+  });
+}
+
 function NavBtn({ label, active, color, onClick }) {
   const c = color || theme.navy;
   return (
@@ -54,7 +65,7 @@ function Header({ student, page, setPage, onLogout }) {
           {student && (
             <>
               <div style={{ fontSize: "14px", color: theme.muted, padding: "6px 12px", border: `1px solid ${theme.border}`, borderRadius: "8px" }}>
-                Logged in as <strong style={{ color: theme.text }}>{student.first_name} {student.last_name}</strong> • ID {student.student_id}
+                Logged in as <strong style={{ color: theme.text }}>{student.first_name} {student.last_name}</strong> • ID {student.id}
               </div>
               <NavBtn label="My Courses" active={page === "enrolled"} onClick={() => setPage("enrolled")} />
               <NavBtn label="Enroll" active={page === "options"} color={theme.red} onClick={() => setPage("options")} />
@@ -72,34 +83,36 @@ function LoginPage({ onLogin }) {
   const [name, setName] = useState("");
   const [studentId, setStudentId] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function handleLogin(e) {
     e.preventDefault();
-    const normalizedName = name.trim().toLowerCase();
-    const idNumber = Number(studentId);
+    setLoading(true);
+    setError("");
     try {
-      const response = await fetch(`${API}/students`);
-      const students = await response.json();
-      const match = students.find((s) => {
-        const fullName = `${s.first_name} ${s.last_name}`.toLowerCase();
-        return s.id === idNumber && fullName === normalizedName;
+      const response = await fetch(`${API}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: Number(studentId), name: name.trim() })
       });
-      if (!match) {
-        setError("No student found. Try: John The Great / 1");
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || "Login failed");
+        setLoading(false);
         return;
       }
-      setError("");
-      onLogin({ student_id: match.id, first_name: match.first_name, last_name: match.last_name, email: match.email });
+      onLogin(data.student, data.token);
     } catch (err) {
       setError("Could not connect to server. Make sure Flask is running.");
     }
+    setLoading(false);
   }
 
   return (
     <main style={{ minHeight: "80vh", background: `linear-gradient(135deg, ${theme.navy} 0%, ${theme.mediumBlue} 70%, ${theme.red} 100%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ background: theme.white, borderRadius: "24px", padding: "2rem", width: "100%", maxWidth: "420px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", margin: "2rem" }}>
         <h2 style={{ color: theme.navy, marginTop: 0 }}>Student Login</h2>
-        <p style={{ color: theme.muted, fontSize: "14px" }}>Enter your full name and student ID to see your personal courses.</p>
+        <p style={{ color: theme.muted, fontSize: "14px" }}>Enter your full name and student ID.</p>
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom: "1rem" }}>
             <label style={{ display: "block", fontSize: "14px", fontWeight: 500, marginBottom: "6px" }}>Full Name</label>
@@ -110,28 +123,71 @@ function LoginPage({ onLogin }) {
             <input value={studentId} onChange={e => setStudentId(e.target.value)} placeholder="1" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: `1px solid ${theme.border}`, fontSize: "14px", boxSizing: "border-box" }} />
           </div>
           {error && <p style={{ background: `${theme.red}12`, color: theme.red, padding: "10px", borderRadius: "8px", fontSize: "14px", marginBottom: "1rem" }}>{error}</p>}
-          <button type="submit" style={{ width: "100%", padding: "12px", background: theme.red, color: theme.white, border: "none", borderRadius: "8px", fontSize: "16px", cursor: "pointer", fontWeight: 600 }}>Login</button>
+          <button type="submit" disabled={loading} style={{ width: "100%", padding: "12px", background: loading ? theme.muted : theme.red, color: theme.white, border: "none", borderRadius: "8px", fontSize: "16px", cursor: loading ? "default" : "pointer", fontWeight: 600 }}>
+            {loading ? "Logging in..." : "Login"}
+          </button>
         </form>
       </div>
     </main>
   );
 }
 
-function MyCoursesPage({ student, setPage }) {
+// ─────────────────────────────────────────────
+// MY COURSES PAGE
+// Shows student's courses with Drop button
+// Drop = sets status to 'dropped' (keeps history)
+// ─────────────────────────────────────────────
+function MyCoursesPage({ student, token, setPage }) {
   const [myCourses, setMyCourses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [dropping, setDropping] = useState(null);
+
+  function loadCourses() {
+    setLoading(true);
+    authFetch(`${API}/students/${student.id}/enrollments`, token)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) setError(data.error);
+        else setMyCourses(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError("Could not load your courses.");
+        setLoading(false);
+      });
+  }
 
   useEffect(() => {
-    fetch(`${API}/students/${student.student_id}/enrollments`)
-      .then(r => r.json())
-      .then(setMyCourses);
-  }, [student.student_id]);
+    loadCourses();
+  }, [student.id, token]);
 
-  const totalCredits = myCourses.reduce((sum, c) => sum + (c.credits || 0), 0);
+  async function handleDrop(enrollmentId) {
+    if (!window.confirm("Are you sure you want to drop this course?")) return;
+    setDropping(enrollmentId);
+    try {
+      const response = await authFetch(`${API}/enrollment/${enrollmentId}/drop`, token, {
+        method: "PUT"
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || "Could not drop course");
+      } else {
+        loadCourses();
+      }
+    } catch (err) {
+      alert("Could not drop course. Check Flask server.");
+    }
+    setDropping(null);
+  }
+
+  const activeCourses = myCourses.filter(c => c.status !== 'dropped');
+  const totalCredits = activeCourses.reduce((sum, c) => sum + (c.credits || 0), 0);
 
   return (
     <main style={{ maxWidth: "1200px", margin: "2rem auto", padding: "0 1.5rem" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "2rem" }}>
-        {[["My Courses", myCourses.length, theme.navy], ["Total Credits", totalCredits, theme.red], ["Student", `${student.first_name} ${student.last_name}`, theme.charcoal]].map(([label, val, color]) => (
+        {[["Active Courses", activeCourses.length, theme.navy], ["Total Credits", totalCredits, theme.red], ["Student", `${student.first_name} ${student.last_name}`, theme.charcoal]].map(([label, val, color]) => (
           <Card key={label} style={{ borderRadius: "16px", border: `1px solid ${theme.border}` }}>
             <CardContent style={{ padding: "1.25rem" }}>
               <p style={{ color: theme.muted, fontSize: "13px" }}>{label}</p>
@@ -145,42 +201,69 @@ function MyCoursesPage({ student, setPage }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <CardTitle style={{ color: theme.navy }}>My Enrolled Courses</CardTitle>
-              <CardDescription>Only your personal enrollments from the database.</CardDescription>
+              <CardDescription>Your personal enrollments. Drop a course to remove it from your schedule.</CardDescription>
             </div>
             <button onClick={() => setPage("options")} style={{ background: theme.red, color: theme.white, border: "none", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontWeight: 500 }}>Browse More</button>
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader style={{ background: `${theme.navy}08` }}>
-              <TableRow>
-                <TableHead>Code</TableHead><TableHead>Title</TableHead><TableHead>Credits</TableHead><TableHead>Grade</TableHead><TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {myCourses.length === 0 ? (
-                <TableRow><TableCell colSpan={5} style={{ textAlign: "center", color: theme.muted }}>No enrollments found.</TableCell></TableRow>
-              ) : myCourses.map((c, i) => (
-                <TableRow key={i}>
-                  <TableCell style={{ fontWeight: 600, color: theme.navy }}>{c.code}</TableCell>
-                  <TableCell>{c.title}</TableCell>
-                  <TableCell>{c.credits}</TableCell>
-                  <TableCell>{c.grade || "—"}</TableCell>
-                  <TableCell>
-                    <Badge style={{ background: c.status === "enrolled" ? `${theme.navy}12` : c.status === "completed" ? `${theme.mediumBlue}12` : `${theme.red}12`, color: c.status === "enrolled" ? theme.navy : c.status === "completed" ? theme.mediumBlue : theme.red }}>
-                      {c.status}
-                    </Badge>
-                  </TableCell>
+          {loading && <p style={{ color: theme.muted, textAlign: "center" }}>Loading your courses...</p>}
+          {error && <p style={{ color: theme.red, textAlign: "center" }}>{error}</p>}
+          {!loading && !error && (
+            <Table>
+              <TableHeader style={{ background: `${theme.navy}08` }}>
+                <TableRow>
+                  <TableHead>Code</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Credits</TableHead>
+                  <TableHead>Grade</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {myCourses.length === 0 ? (
+                  <TableRow><TableCell colSpan={6} style={{ textAlign: "center", color: theme.muted }}>No enrollments found.</TableCell></TableRow>
+                ) : myCourses.map((c, i) => (
+                  <TableRow key={i} style={{ opacity: c.status === 'dropped' ? 0.5 : 1 }}>
+                    <TableCell style={{ fontWeight: 600, color: theme.navy }}>{c.code}</TableCell>
+                    <TableCell>{c.title}</TableCell>
+                    <TableCell>{c.credits}</TableCell>
+                    <TableCell>{c.grade || "—"}</TableCell>
+                    <TableCell>
+                      <Badge style={{ background: c.status === "enrolled" ? `${theme.navy}12` : c.status === "completed" ? `${theme.mediumBlue}12` : `${theme.red}12`, color: c.status === "enrolled" ? theme.navy : c.status === "completed" ? theme.mediumBlue : theme.red }}>
+                        {c.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {c.status === "enrolled" ? (
+                        <button
+                          onClick={() => handleDrop(c.enrollment_id)}
+                          disabled={dropping === c.enrollment_id}
+                          style={{ background: "transparent", color: theme.red, border: `1px solid ${theme.red}`, borderRadius: "6px", padding: "4px 10px", cursor: "pointer", fontSize: "13px", fontWeight: 500 }}
+                        >
+                          {dropping === c.enrollment_id ? "Dropping..." : "Drop"}
+                        </button>
+                      ) : (
+                        <span style={{ color: theme.muted, fontSize: "13px" }}>—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </main>
   );
 }
 
+// ─────────────────────────────────────────────
+// COURSE OPTIONS PAGE
+// Prevents duplicate enrollments by checking
+// enrolledIds before showing Enroll button
+// ─────────────────────────────────────────────
 function CourseOptionsPage({ enrolledIds, onEnroll, courses }) {
   const [query, setQuery] = useState("");
   const filteredCourses = useMemo(() => {
@@ -195,6 +278,7 @@ function CourseOptionsPage({ enrolledIds, onEnroll, courses }) {
         <div>
           <p style={{ color: theme.red, fontSize: "13px", fontWeight: 500, margin: 0 }}>Course Registration</p>
           <h2 style={{ color: theme.navy, margin: "4px 0 0" }}>Available Courses</h2>
+          <p style={{ color: theme.muted, fontSize: "13px", margin: "4px 0 0" }}>You cannot enroll in the same course twice.</p>
         </div>
         <div style={{ position: "relative" }}>
           <Search style={{ position: "absolute", left: "12px", top: "12px", width: "16px", height: "16px", color: theme.muted }} />
@@ -222,7 +306,11 @@ function CourseOptionsPage({ enrolledIds, onEnroll, courses }) {
                 </div>
               </CardHeader>
               <CardContent>
-                <button disabled={isEnrolled} onClick={() => onEnroll(course.id)} style={{ width: "100%", padding: "10px", background: isEnrolled ? theme.lightGray : theme.red, color: isEnrolled ? theme.charcoal : theme.white, border: "none", borderRadius: "8px", cursor: isEnrolled ? "default" : "pointer", fontWeight: 600 }}>
+                <button
+                  disabled={isEnrolled}
+                  onClick={() => onEnroll(course.id)}
+                  style={{ width: "100%", padding: "10px", background: isEnrolled ? theme.lightGray : theme.red, color: isEnrolled ? theme.charcoal : theme.white, border: "none", borderRadius: "8px", cursor: isEnrolled ? "not-allowed" : "pointer", fontWeight: 600 }}
+                >
                   {isEnrolled ? "Already Enrolled" : "Enroll in this Class"}
                 </button>
               </CardContent>
@@ -273,7 +361,7 @@ function PublicEnrollmentsPage({ enrollments }) {
       <Card style={{ borderRadius: "16px", border: `1px solid ${theme.border}` }}>
         <CardHeader>
           <CardTitle style={{ color: theme.navy, display: "flex", alignItems: "center", gap: "8px" }}><ClipboardList style={{ width: "20px", height: "20px" }} /> Enrollment Records</CardTitle>
-          <CardDescription>All enrollment records from the database.</CardDescription>
+          <CardDescription>All enrollment records — duplicates removed.</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -335,7 +423,7 @@ function PublicInstructorsPage({ instructors }) {
 function CourseRostersPage({ enrollments, courses }) {
   const [selectedCourseId, setSelectedCourseId] = useState(courses[0]?.id || null);
   const selectedCourse = courses.find(c => c.id === selectedCourseId);
-  const rosterRows = enrollments.filter(e => e.course === selectedCourse?.title);
+  const rosterRows = enrollments.filter(e => e.course === selectedCourse?.title && e.status !== 'dropped');
 
   return (
     <main style={{ maxWidth: "1200px", margin: "2rem auto", padding: "0 1.5rem" }}>
@@ -346,7 +434,7 @@ function CourseRostersPage({ enrollments, courses }) {
           <CardHeader><CardTitle style={{ color: theme.navy }}>Select a Course</CardTitle></CardHeader>
           <CardContent style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {courses.map((course) => {
-              const count = enrollments.filter(e => e.course === course.title).length;
+              const count = enrollments.filter(e => e.course === course.title && e.status !== 'dropped').length;
               const isSelected = selectedCourseId === course.id;
               return (
                 <button key={course.id} onClick={() => setSelectedCourseId(course.id)} style={{ width: "100%", borderRadius: "12px", border: `1px solid ${isSelected ? theme.navy : theme.border}`, background: isSelected ? `${theme.navy}08` : theme.white, padding: "12px", textAlign: "left", cursor: "pointer" }}>
@@ -365,7 +453,7 @@ function CourseRostersPage({ enrollments, courses }) {
         <Card style={{ borderRadius: "16px", border: `1px solid ${theme.border}` }}>
           <CardHeader>
             <CardTitle style={{ color: theme.navy }}>{selectedCourse?.code} Roster</CardTitle>
-            <CardDescription>{selectedCourse?.title}</CardDescription>
+            <CardDescription>{selectedCourse?.title} — active enrollments only</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -380,7 +468,7 @@ function CourseRostersPage({ enrollments, courses }) {
                     <TableCell>{row.status}</TableCell>
                   </TableRow>
                 )) : (
-                  <TableRow><TableCell colSpan={3} style={{ textAlign: "center", color: theme.muted }}>No students enrolled yet.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={3} style={{ textAlign: "center", color: theme.muted }}>No active students in this course.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -393,6 +481,7 @@ function CourseRostersPage({ enrollments, courses }) {
 
 export default function MSURegistrationUIPrototype() {
   const [student, setStudent] = useState(null);
+  const [token, setToken] = useState(null);
   const [page, setPage] = useState("login");
   const [enrolledIds, setEnrolledIds] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -405,13 +494,15 @@ export default function MSURegistrationUIPrototype() {
     fetch(`${API}/instructors`).then(r => r.json()).then(setInstructors);
   }, []);
 
-  function handleLogin(foundStudent) {
+  function handleLogin(foundStudent, jwtToken) {
     setStudent(foundStudent);
+    setToken(jwtToken);
     setPage("enrolled");
   }
 
   function handleLogout() {
     setStudent(null);
+    setToken(null);
     setPage("login");
     setEnrolledIds([]);
   }
@@ -419,11 +510,15 @@ export default function MSURegistrationUIPrototype() {
   async function handleEnroll(courseId) {
     if (!enrolledIds.includes(courseId)) {
       try {
-        await fetch(`${API}/enroll`, {
+        const response = await authFetch(`${API}/enroll`, token, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ student_id: student.student_id, section_id: courseId })
+          body: JSON.stringify({ student_id: student.id, section_id: courseId })
         });
+        const data = await response.json();
+        if (!response.ok) {
+          alert(data.error || "Enrollment failed");
+          return;
+        }
         setEnrolledIds([...enrolledIds, courseId]);
         const updated = await fetch(`${API}/enrollments`).then(r => r.json());
         setEnrollments(updated);
@@ -440,7 +535,7 @@ export default function MSURegistrationUIPrototype() {
       {!student && page === "public_courses" && <PublicCoursesPage courses={courses} />}
       {!student && page === "public_enrollments" && <PublicEnrollmentsPage enrollments={enrollments} />}
       {!student && page === "public_instructors" && <PublicInstructorsPage instructors={instructors} />}
-      {student && page === "enrolled" && <MyCoursesPage student={student} setPage={setPage} />}
+      {student && page === "enrolled" && <MyCoursesPage student={student} token={token} setPage={setPage} />}
       {student && page === "options" && <CourseOptionsPage enrolledIds={enrolledIds} onEnroll={handleEnroll} courses={courses} />}
       {student && page === "rosters" && <CourseRostersPage enrollments={enrollments} courses={courses} />}
     </div>
